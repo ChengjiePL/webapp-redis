@@ -3,9 +3,8 @@ import redis
 
 app = Flask(__name__)
 
-# TODO: Configura la conexión a Redis 
-#redis_client = redis_client es el objeto de conexión a Redis
-
+# Conexión a Redis
+redis_client = redis.StrictRedis(host='redis', port=6379, decode_responses=True)
 
 @app.route('/')
 def home():
@@ -13,31 +12,51 @@ def home():
 
 @app.route('/products', methods=['GET'])
 def get_products():
-    
     products = []
-    # TODO: Obtener la lista de productos de Redis
-
+    for key in redis_client.scan_iter("producto:*"):
+        products.append(redis_client.hgetall(key))
     return jsonify(products)
 
 @app.route('/cart', methods=['GET'])
 def get_cart():
-    
     cart_items = []
-    # TODO: Obtener los elementos de la cesta desde Redis
-
-
+    cart_data = redis_client.hgetall("cart")
+    for product_id, quantity in cart_data.items():
+        product = redis_client.hgetall(f"producto:{product_id}")
+        if product:
+            cart_items.append({
+                "id": product_id,
+                "name": product.get("name"),
+                "price": float(product.get("price", 0)),
+                "quantity": int(quantity)
+            })
     return jsonify(cart_items)
 
 @app.route('/cart', methods=['POST'])
 def add_to_cart():
-    # TODO: Añadir un producto a la cesta en Redis con las verificaciones pertinentes
-    pass
+    data = request.get_json()
+    product_id = data.get("product_id")
 
+    if not product_id or not redis_client.exists(f"producto:{product_id}"):
+        return jsonify({"status": "error"}), 400
+
+    # Añadir o incrementar cantidad en la cesta
+    redis_client.hincrby("cart", product_id, 1)
+    return jsonify({"status": "added"}), 200
 
 @app.route('/checkout', methods=['POST'])
 def checkout():
-    # TODO: Procesar la compra y limpiar la cesta en Redis
-    pass
+    cart_data = redis_client.hgetall("cart")
+    if not cart_data:
+        return jsonify({"status": "empty"}), 200
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    # Reducir stock de productos según la cesta
+    for product_id, quantity in cart_data.items():
+        redis_client.hincrby(f"producto:{product_id}", "stock", -int(quantity))
+
+    # Limpiar la cesta
+    redis_client.delete("cart")
+    return jsonify({"status": "completed"}), 200
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0")

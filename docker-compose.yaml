@@ -19,3 +19,6 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+    volumes:
+      - ./app:/app
+
